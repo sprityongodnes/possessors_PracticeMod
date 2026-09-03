@@ -8,11 +8,12 @@ local configFileName = "practice_mod_config.txt"
 
 -- [EN] Default settings / [FR] Paramètres par défaut
 local config = {
-    scale = 1.0,        -- [EN] Text scale / [FR] Échelle du texte
-    posX = 50,          -- [EN] X Position in pixels / [FR] Position X
-    posY = 50,          -- [EN] Y Position in pixels / [FR] Position Y
-    showTimer = true,   -- [EN] Show Timer / [FR] Afficher le chrono
-    showStats = true    -- [EN] Show Stats / [FR] Afficher les stats
+    scale = 1.0,      -- [EN] Text scale / [FR] Échelle du texte
+    -- Info: "Anchor" positions are [0,1]
+    anchorX = 0.01,   -- [EN] X Position / [FR] Position X
+    anchorY = 0.3,    -- [EN] Y Position / [FR] Position Y
+    showTimer = true, -- [EN] Show Timer / [FR] Afficher le chrono
+    showStats = true  -- [EN] Show Stats / [FR] Afficher les stats
 }
 
 -- [EN] Save settings to file / [FR] Sauvegarder les paramètres dans un fichier
@@ -62,8 +63,8 @@ local tempsMessage = 0
 local cooldownAction = 0.0
 
 local savestates = {}
-for i = 1, 5 do 
-    savestates[i] = { saved = false, attempts = 0 } 
+for i = 1, 5 do
+    savestates[i] = { saved = false, attempts = 0 }
 end
 local currentSlot = 1
 
@@ -91,18 +92,16 @@ local function ApplyHUDTransforms()
     -- 1. Appliquer l'échelle (Fonctionne parfaitement sur le MainWidget)
     MainWidget:SetRenderScale({ X = config.scale, Y = config.scale })
 
-    -- 2. Appliquer la position en pixels
-    -- On force l'ancre en haut à gauche (0,0) pour que les pixels correspondent à l'écran
-    MainWidget:SetAnchorsInViewport({ Minimum = { X = 0.0, Y = 0.0 }, Maximum = { X = 0.0, Y = 0.0 } })
-    MainWidget:SetAlignmentInViewport({ X = 0.0, Y = 0.0 })
-    MainWidget:SetPositionInViewport({ X = config.posX, Y = config.posY }, false)
+    -- 2. Appliquer la position
+    -- On utilise les ancres pour que la position soit la même n'importe quelle taille d'écran
+    MainWidget:SetAnchorsInViewport({ Minimum = { X = config.anchorX, Y = config.anchorY }, Maximum = { X = config.anchorX, Y = config.anchorY } })
 end
 
 -- [EN] In-game native HUD creation / [FR] Création du HUD natif en jeu
 local function InitHUD()
     local p = UEHelpers.GetPlayerController()
-    if not p or not p:IsValid() or not p.MyHUD or not p.MyHUD:IsValid() then 
-        return false 
+    if not p or not p:IsValid() or not p.MyHUD or not p.MyHUD:IsValid() then
+        return false
     end
 
     local success, err = pcall(function()
@@ -117,7 +116,7 @@ local function InitHUD()
 
         MainWidget:AddToViewport(999)
         ApplyHUDTransforms()
-        
+
         PlayerPortal = FindFirstOf("CBP_PlayerPortal_C")
         SaveDataSubsystem = FindFirstOf("SaveSlotSubsystem")
     end)
@@ -133,21 +132,25 @@ end
 local function SaveState()
     local Pawn = UEHelpers.GetPlayer()
     if not Pawn or not SaveDataSubsystem then return end
-    
+
     local Loc = Pawn:K2_GetActorLocation()
     local Rot = Pawn:K2_GetActorRotation()
-    
+
     savestates[currentSlot] = {
         saved = true,
         attempts = 0,
-        posX = Loc.X, posY = Loc.Y, posZ = Loc.Z,
-        rotPitch = Rot.Pitch, rotRoll = Rot.Roll, rotYaw = Rot.Yaw,
+        posX = Loc.X,
+        posY = Loc.Y,
+        posZ = Loc.Z,
+        rotPitch = Rot.Pitch,
+        rotRoll = Rot.Roll,
+        rotYaw = Rot.Yaw,
         health = Pawn.PrimaryHealth:GetCurrentEnergy(),
         heals = Pawn.HealEnergy:GetCurrentEnergy(),
         ammo = Pawn.AmmoEnergy:GetCurrentEnergy(),
         saveData = SaveDataSubsystem:GetSaveGame(),
     }
-    
+
     messageAction = "Saved Slot " .. tostring(currentSlot)
     tempsMessage = 2.0
 end
@@ -156,25 +159,26 @@ end
 local function LoadState()
     if cooldownAction > 0 then return end
     local state = savestates[currentSlot]
-    
-    if not state or not state.saved then 
+
+    if not state or not state.saved then
         messageAction = "Slot " .. tostring(currentSlot) .. " is empty!"
         tempsMessage = 1.5
-        return 
+        return
     end
-    
+
     local Pawn = UEHelpers.GetPlayer()
     if not Pawn or not SaveDataSubsystem then return end
-    
+
     SaveDataSubsystem.ActiveSaveGame = state.saveData
     SaveDataSubsystem:LoadData()
-    
-    Pawn:K2_TeleportTo({X = state.posX, Y = state.posY, Z = state.posZ}, {Pitch = state.rotPitch, Roll = state.rotRoll, Yaw = state.rotYaw})
-    
+
+    Pawn:K2_TeleportTo({ X = state.posX, Y = state.posY, Z = state.posZ },
+        { Pitch = state.rotPitch, Roll = state.rotRoll, Yaw = state.rotYaw })
+
     Pawn.PrimaryHealth:SetEnergy(state.health)
     Pawn.HealEnergy:SetEnergy(state.heals)
     Pawn.AmmoEnergy:SetEnergy(state.ammo)
-    
+
     state.attempts = state.attempts + 1
     cooldownAction = 0.3
     messageAction = "Loaded Slot " .. tostring(currentSlot)
@@ -188,19 +192,25 @@ end
 -- [EN] Timer & Slots / [FR] Chrono & Slots
 RegisterKeyBind(Key.F1, function() chronoEnMarche = not chronoEnMarche end)
 RegisterKeyBind(Key.F2, function() tempsActuel = 0.0 end)
-RegisterKeyBind(Key.F3, function() currentSlot = (currentSlot == 1) and 5 or (currentSlot - 1); messageAction = "Slot: " .. tostring(currentSlot); tempsMessage = 1.0 end)
-RegisterKeyBind(Key.F4, function() currentSlot = (currentSlot == 5) and 1 or (currentSlot + 1); messageAction = "Slot: " .. tostring(currentSlot); tempsMessage = 1.0 end)
+RegisterKeyBind(Key.F3,
+    function()
+        currentSlot = (currentSlot == 1) and 5 or (currentSlot - 1); messageAction = "Slot: " .. tostring(currentSlot); tempsMessage = 1.0
+    end)
+RegisterKeyBind(Key.F4,
+    function()
+        currentSlot = (currentSlot == 5) and 1 or (currentSlot + 1); messageAction = "Slot: " .. tostring(currentSlot); tempsMessage = 1.0
+    end)
 
 -- [EN] Save & Load / [FR] Sauvegarder & Charger
 RegisterKeyBind(Key.F5, SaveState)
 RegisterKeyBind(Key.F6, LoadState)
 
 -- [EN] Visibility Toggles / [FR] Cacher ou Afficher des infos
-RegisterKeyBind(Key.F7, function() 
+RegisterKeyBind(Key.F7, function()
     config.showTimer = not config.showTimer
     SaveConfig()
 end)
-RegisterKeyBind(Key.F8, function() 
+RegisterKeyBind(Key.F8, function()
     config.showStats = not config.showStats
     SaveConfig()
 end)
@@ -238,8 +248,8 @@ RegisterKeyBind(VK_DOWN, function()
 end)
 
 -- [EN] SCALING (Page Up / Page Down) / [FR] TAILLE DU HUD (Page Up / Page Down)
-local VK_PRIOR = 0x21 -- Page Up
-local VK_NEXT  = 0x22 -- Page Down
+local VK_PRIOR = 0x21               -- Page Up
+local VK_NEXT  = 0x22               -- Page Down
 
 RegisterKeyBind(VK_NEXT, function() -- Page Down (Réduire)
     config.scale = math.max(0.5, config.scale - 0.1)
@@ -278,7 +288,7 @@ local function GameTickLogic(dt)
         local minutes = math.floor((tempsActuel % 3600) / 60)
         local secondes = math.floor(tempsActuel % 60)
         local millisecondes = math.floor((tempsActuel % 1) * 100)
-        local tempsFormate = (heures > 0) 
+        local tempsFormate = (heures > 0)
             and string.format("%02d:%02d:%02d.%02d", heures, minutes, secondes, millisecondes)
             or string.format("%02d:%02d.%02d", minutes, secondes, millisecondes)
         table.insert(lines, "Timer : " .. tempsFormate)
