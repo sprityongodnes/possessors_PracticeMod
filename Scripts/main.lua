@@ -119,7 +119,6 @@ local function Init()
         MainWidget:AddToViewport(0)
         ApplyHUDTransforms()
 
-        PlayerPortal = FindFirstOf("CBP_PlayerPortal_C")
         SaveDataSubsystem = FindFirstOf("SaveSlotSubsystem")
     end)
 
@@ -132,6 +131,7 @@ end
 
 -- [EN] Save State Logic / [FR] Logique de sauvegarde
 local function SaveState()
+    ---@type ABP_PosePlayerPawn_C
     local Pawn = UEHelpers.GetPlayer()
     if not Pawn or not SaveDataSubsystem then return end
 
@@ -159,6 +159,10 @@ end
 
 -- [EN] Load State Logic / [FR] Logique de chargement
 local function LoadState()
+    -- Things to look at
+    -- QuestManager
+    -- MapManager
+    -- BP_PosePlayerPawn_C has some update functions
     if cooldownAction > 0 then return end
     local state = savestates[currentSlot]
 
@@ -168,6 +172,7 @@ local function LoadState()
         return
     end
 
+    ---@type ABP_PosePlayerPawn_C
     local Pawn = UEHelpers.GetPlayer()
     if not Pawn or not SaveDataSubsystem then return end
 
@@ -180,6 +185,13 @@ local function LoadState()
     Pawn.PrimaryHealth:SetEnergy(state.health)
     Pawn.HealEnergy:SetEnergy(state.heals)
     Pawn.AmmoEnergy:SetEnergy(state.ammo)
+    -- just start calling everything and hope it works
+    Pawn:UpdatePlayerStats()
+    Pawn:UpdateSwimEnergyWidgetVisibility()
+    Pawn:UpdateWallRunEnergyWidgetVisibility()
+    ---@type ABP_MapManager_C
+    local mapManager = FindFirstOf("BP_MapManager_C")
+    mapManager:SaveSlotSubsystem_OnLoadEnd(true)
 
     state.attempts = state.attempts + 1
     cooldownAction = 0.3
@@ -304,9 +316,6 @@ local function GameTickLogic(dt)
     end
 end
 
--- local titleScreen = FindFirstOf("WBP_TitleScreen_MainMenu_C")
--- print(titleScreen:IsValid())
-
 local function StartPlayerHook()
     if not initialized then
         Init()
@@ -320,17 +329,31 @@ local function StartPlayerHook()
                 pcall(GameTickLogic, dt)
                 -- print('running logic')
             end)
+        -- Forces reinit when returning to main menu/resuming
+        RegisterHook("/Game/Pose/Common/Systems/BP_PoseHUD.BP_PoseHUD_C:ReturnToMainMenu", function()
+            initialized = false
+        end)
     end
 end
 
-local player = UEHelpers:GetPlayerController()
+local player = UEHelpers:GetPlayer()
 if player:IsValid() then
     StartPlayerHook()
 end
 
--- Once the player has been created, they will always be there and our hook remains valid.
--- However, when the game is first opened, there is no player, so we need to wait
--- for the player to be created.
+-- APoseGameMode ResetWorld!
+
+local gameStartRegistered = false
 RegisterBeginPlayPostHook(function(Context)
-    StartPlayerHook()
+    if not gameStartRegistered then
+        RegisterHook("/Game/Pose/UI/LoadingScreen/WBP_LoadingScreen.WBP_LoadingScreen_C:StartFadeOut", function()
+            -- Calling DoesPlayerExist() and maybe Init()
+            -- while the game is loading seems to cause an infinite load,
+            -- so we have to wait until later
+            -- if DoesPlayerExist() then
+            StartPlayerHook()
+            -- end
+        end)
+        gameStartRegistered = true
+    end
 end)
