@@ -97,8 +97,8 @@ local function ApplyHUDTransforms()
     MainWidget:SetAnchorsInViewport({ Minimum = { X = config.anchorX, Y = config.anchorY }, Maximum = { X = config.anchorX, Y = config.anchorY } })
 end
 
--- [EN] In-game native HUD creation / [FR] Création du HUD natif en jeu
-local function InitHUD()
+-- [EN] Initializes needed variables and finds important objects / [FR] Créer des vars utiles et trouver les objets utiles
+local function Init()
     local p = UEHelpers.GetPlayerController()
     if not p or not p:IsValid() or not p.MyHUD or not p.MyHUD:IsValid() then
         return false
@@ -114,7 +114,9 @@ local function InitHUD()
         TextBox:SetText(FText("Practice Mod Ready"))
         tree.RootWidget = TextBox
 
-        MainWidget:AddToViewport(999)
+        -- Z-index needs to be lower than the pause menu, apparently 999 happened to work for that
+        -- but I'd rather it be 0 to avoid conflicts.
+        MainWidget:AddToViewport(0)
         ApplyHUDTransforms()
 
         PlayerPortal = FindFirstOf("CBP_PlayerPortal_C")
@@ -269,11 +271,6 @@ end)
 -- [EN] MAIN GAME TICK / [FR] BOUCLE PRINCIPALE
 -- ==========================================
 local function GameTickLogic(dt)
-    if not initialized then
-        InitHUD()
-        return
-    end
-
     if cooldownAction > 0 then cooldownAction = cooldownAction - dt end
     if chronoEnMarche then tempsActuel = tempsActuel + dt end
     if tempsMessage > 0 then
@@ -307,7 +304,33 @@ local function GameTickLogic(dt)
     end
 end
 
-RegisterHook("/Game/Pose/Characters/PlayerCharacter/ABP_Player.ABP_Player_C:OnTick", function(self, DeltaTime)
-    local dt = type(DeltaTime) == "number" and DeltaTime or DeltaTime:get()
-    pcall(GameTickLogic, dt)
+-- local titleScreen = FindFirstOf("WBP_TitleScreen_MainMenu_C")
+-- print(titleScreen:IsValid())
+
+local function StartPlayerHook()
+    if not initialized then
+        Init()
+        if not initialized then
+            error("[PracticeMod] Unable to initialize PracticeMod, maybe try restarting?")
+            return
+        end
+        local mainHookIds = RegisterHook("/Game/Pose/Characters/PlayerCharacter/ABP_Player.ABP_Player_C:OnTick",
+            function(self, DeltaTime)
+                local dt = type(DeltaTime) == "number" and DeltaTime or DeltaTime:get()
+                pcall(GameTickLogic, dt)
+                -- print('running logic')
+            end)
+    end
+end
+
+local player = UEHelpers:GetPlayerController()
+if player:IsValid() then
+    StartPlayerHook()
+end
+
+-- Once the player has been created, they will always be there and our hook remains valid.
+-- However, when the game is first opened, there is no player, so we need to wait
+-- for the player to be created.
+RegisterBeginPlayPostHook(function(Context)
+    StartPlayerHook()
 end)
