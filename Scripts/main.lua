@@ -323,7 +323,9 @@ local function GameTickLogic(dt)
         local boss = bossBar.BOSS
         if IsValid(boss) then
             local hp = boss.EnemyHealth:GetCurrentEnergy()
+            local poise = boss.EnemyPoiseEnergy:GetCurrentEnergy()
             table.insert(lines, "Current Boss Health: " .. hp)
+            table.insert(lines, "Current Boss Poise: " .. poise)
         end
     end
 
