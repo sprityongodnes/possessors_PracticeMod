@@ -1,4 +1,6 @@
 local UEHelpers = require("UEHelpers")
+local saveio = require("saveio")
+local util = require("util")
 
 -- ==========================================
 -- [EN] MOD CONFIGURATION SYSTEM
@@ -8,11 +10,12 @@ local configFileName = "practice_mod_config.txt"
 
 -- [EN] Default settings / [FR] Paramètres par défaut
 local config = {
-    scale = 1.0,        -- [EN] Text scale / [FR] Échelle du texte
-    posX = 50,          -- [EN] X Position in pixels / [FR] Position X
-    posY = 50,          -- [EN] Y Position in pixels / [FR] Position Y
-    showTimer = true,   -- [EN] Show Timer / [FR] Afficher le chrono
-    showStats = true    -- [EN] Show Stats / [FR] Afficher les stats
+    scale = 1.0,      -- [EN] Text scale / [FR] Échelle du texte
+    -- Info: "Anchor" positions are [0,1]
+    anchorX = 0.01,   -- [EN] X Position / [FR] Position X
+    anchorY = 0.3,    -- [EN] Y Position / [FR] Position Y
+    showTimer = true, -- [EN] Show Timer / [FR] Afficher le chrono
+    showStats = true  -- [EN] Show Stats / [FR] Afficher les stats
 }
 
 -- [EN] Save settings to file / [FR] Sauvegarder les paramètres dans un fichier
@@ -52,8 +55,9 @@ LoadConfig()
 local initialized = false
 local MainWidget = nil
 local TextBox = nil
+---@type USaveSlotSubsystem
 local SaveDataSubsystem = nil
-local PlayerPortal = nil
+---@type ABP_PoseGameMode_C
 
 local chronoEnMarche = false
 local tempsActuel = 0.0
@@ -61,28 +65,22 @@ local messageAction = ""
 local tempsMessage = 0
 local cooldownAction = 0.0
 
+-- Hooks to track
+local playerPreHook
+local playerPostHook
+local quitPreHook
+local quitPostHook
+
+---@type table<integer, SaveState>
 local savestates = {}
-for i = 1, 5 do 
-    savestates[i] = { saved = false, attempts = 0 } 
-end
+-- for i = 1, 5 do
+--     savestates[i] = {}
+-- end
 local currentSlot = 1
+-- This variable will cause the player to be warped as soon as a load ends
+-- and is set when loading a save state.
+local pendingSaveStateLoad = false
 
-local function IsValid(obj)
-    return obj ~= nil and type(obj.IsValid) == "function" and obj:IsValid()
-end
-
-local function FindClass(path)
-    local cls = StaticFindObject(path)
-    if not IsValid(cls) then error("StaticFindObject failed: " .. path) end
-    return cls
-end
-
-local function Construct(classPath, outer, name)
-    local cls = FindClass(classPath)
-    local obj = StaticConstructObject(cls, outer, FName(name))
-    if not IsValid(obj) then error("StaticConstructObject failed: " .. classPath) end
-    return obj
-end
 
 -- [EN] Update HUD Scale and Free Position / [FR] Met à jour l'échelle et la position libre
 local function ApplyHUDTransforms()
@@ -91,18 +89,16 @@ local function ApplyHUDTransforms()
     -- 1. Appliquer l'échelle (Fonctionne parfaitement sur le MainWidget)
     MainWidget:SetRenderScale({ X = config.scale, Y = config.scale })
 
-    -- 2. Appliquer la position en pixels
-    -- On force l'ancre en haut à gauche (0,0) pour que les pixels correspondent à l'écran
-    MainWidget:SetAnchorsInViewport({ Minimum = { X = 0.0, Y = 0.0 }, Maximum = { X = 0.0, Y = 0.0 } })
-    MainWidget:SetAlignmentInViewport({ X = 0.0, Y = 0.0 })
-    MainWidget:SetPositionInViewport({ X = config.posX, Y = config.posY }, false)
+    -- 2. Appliquer la position
+    -- On utilise les ancres pour que la position soit la même n'importe quelle taille d'écran
+    MainWidget:SetAnchorsInViewport({ Minimum = { X = config.anchorX, Y = config.anchorY }, Maximum = { X = config.anchorX, Y = config.anchorY } })
 end
 
--- [EN] In-game native HUD creation / [FR] Création du HUD natif en jeu
-local function InitHUD()
+-- [EN] Initializes needed variables and finds important objects / [FR] Créer des vars utiles et trouver les objets utiles
+local function Init()
     local p = UEHelpers.GetPlayerController()
-    if not p or not p:IsValid() or not p.MyHUD or not p.MyHUD:IsValid() then 
-        return false 
+    if not p or not p:IsValid() or not p.MyHUD or not p.MyHUD:IsValid() then
+        return false
     end
 
     local success, err = pcall(function()
@@ -115,11 +111,13 @@ local function InitHUD()
         TextBox:SetText(FText("Practice Mod Ready"))
         tree.RootWidget = TextBox
 
-        MainWidget:AddToViewport(999)
+        -- Z-index needs to be lower than the pause menu, apparently 999 happened to work for that
+        -- but I'd rather it be 0 to avoid conflicts.
+        MainWidget:AddToViewport(0)
         ApplyHUDTransforms()
-        
-        PlayerPortal = FindFirstOf("CBP_PlayerPortal_C")
+
         SaveDataSubsystem = FindFirstOf("SaveSlotSubsystem")
+        PoseGameMode = FindFirstOf("BP_PoseGameMode_C")
     end)
 
     if success then
@@ -129,25 +127,35 @@ local function InitHUD()
     return false
 end
 
+-- Signal we need to reinitialize
+local function Deinit()
+    initialized = false
+    UnregisterHook("/Game/Pose/Common/Systems/BP_PoseHUD.BP_PoseHUD_C:ReturnToMainMenu", quitPreHook,
+        quitPostHook)
+    UnregisterHook("/Game/Pose/Characters/PlayerCharacter/ABP_Player.ABP_Player_C:OnTick", playerPreHook,
+        playerPostHook)
+end
+
 -- [EN] Save State Logic / [FR] Logique de sauvegarde
 local function SaveState()
+    ---@type ABP_PosePlayerPawn_C
     local Pawn = UEHelpers.GetPlayer()
     if not Pawn or not SaveDataSubsystem then return end
-    
-    local Loc = Pawn:K2_GetActorLocation()
-    local Rot = Pawn:K2_GetActorRotation()
-    
+
+    ---@type UPoseSaveSlot
+    local saveData = SaveDataSubsystem:GetSaveGame()
+
     savestates[currentSlot] = {
-        saved = true,
-        attempts = 0,
-        posX = Loc.X, posY = Loc.Y, posZ = Loc.Z,
-        rotPitch = Rot.Pitch, rotRoll = Rot.Roll, rotYaw = Rot.Yaw,
+        luaSaveData = SaveDataToLuaTable(saveData.SaveSlotData),
+        pos = Pawn:K2_GetActorLocation(),
+        rot = Pawn:K2_GetActorRotation(),
         health = Pawn.PrimaryHealth:GetCurrentEnergy(),
-        heals = Pawn.HealEnergy:GetCurrentEnergy(),
         ammo = Pawn.AmmoEnergy:GetCurrentEnergy(),
-        saveData = SaveDataSubsystem:GetSaveGame(),
+        heals = Pawn.HealEnergy:GetCurrentEnergy(),
     }
-    
+
+    -- print(SaveDataSubsystem:WriteSaveSlotData(FString("SavestateSave"), 5, saveData.SaveSlotData))
+
     messageAction = "Saved Slot " .. tostring(currentSlot)
     tempsMessage = 2.0
 end
@@ -156,26 +164,31 @@ end
 local function LoadState()
     if cooldownAction > 0 then return end
     local state = savestates[currentSlot]
-    
-    if not state or not state.saved then 
+
+    if not state then
         messageAction = "Slot " .. tostring(currentSlot) .. " is empty!"
         tempsMessage = 1.5
-        return 
+        return
     end
-    
-    local Pawn = UEHelpers.GetPlayer()
-    if not Pawn or not SaveDataSubsystem then return end
-    
-    SaveDataSubsystem.ActiveSaveGame = state.saveData
-    SaveDataSubsystem:LoadData()
-    
-    Pawn:K2_TeleportTo({X = state.posX, Y = state.posY, Z = state.posZ}, {Pitch = state.rotPitch, Roll = state.rotRoll, Yaw = state.rotYaw})
-    
-    Pawn.PrimaryHealth:SetEnergy(state.health)
-    Pawn.HealEnergy:SetEnergy(state.heals)
-    Pawn.AmmoEnergy:SetEnergy(state.ammo)
-    
-    state.attempts = state.attempts + 1
+    ---@type ABP_PosePlayerController_C
+    local controller = UEHelpers:GetPlayerController()
+
+    LoadLuaData(state.luaSaveData, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
+    SaveDataSubsystem:SetSavingEnabled(FName("meow"), false)
+    controller:RestartLevel()
+
+    Deinit()                    -- Some stuff gets recreated on RestartLevel() and we need to call Init() again.
+    pendingSaveStateLoad = true -- Once the loading screen ends, the player will be warped.
+
+
+    local path = "/Script/Pose.PoseHUD:HideLoadingScreen"
+    ExecuteInGameThreadWithDelay(1100, function()
+        SaveDataSubsystem:SetSavingEnabled(FName("meow"), true)
+        SaveDataSubsystem.SaveDisablingReasons:Empty()
+    end)
+
+
+    -- state.attempts = state.attempts + 1
     cooldownAction = 0.3
     messageAction = "Loaded Slot " .. tostring(currentSlot)
     tempsMessage = 1.0
@@ -188,21 +201,32 @@ end
 -- [EN] Timer & Slots / [FR] Chrono & Slots
 RegisterKeyBind(Key.F1, function() chronoEnMarche = not chronoEnMarche end)
 RegisterKeyBind(Key.F2, function() tempsActuel = 0.0 end)
-RegisterKeyBind(Key.F3, function() currentSlot = (currentSlot == 1) and 5 or (currentSlot - 1); messageAction = "Slot: " .. tostring(currentSlot); tempsMessage = 1.0 end)
-RegisterKeyBind(Key.F4, function() currentSlot = (currentSlot == 5) and 1 or (currentSlot + 1); messageAction = "Slot: " .. tostring(currentSlot); tempsMessage = 1.0 end)
+RegisterKeyBind(Key.F3,
+    function()
+        currentSlot = (currentSlot == 1) and 5 or (currentSlot - 1); messageAction = "Slot: " .. tostring(currentSlot); tempsMessage = 1.0
+    end)
+RegisterKeyBind(Key.F4,
+    function()
+        currentSlot = (currentSlot == 5) and 1 or (currentSlot + 1); messageAction = "Slot: " .. tostring(currentSlot); tempsMessage = 1.0
+    end)
 
 -- [EN] Save & Load / [FR] Sauvegarder & Charger
 RegisterKeyBind(Key.F5, SaveState)
 RegisterKeyBind(Key.F6, LoadState)
 
 -- [EN] Visibility Toggles / [FR] Cacher ou Afficher des infos
-RegisterKeyBind(Key.F7, function() 
+RegisterKeyBind(Key.F7, function()
     config.showTimer = not config.showTimer
     SaveConfig()
 end)
-RegisterKeyBind(Key.F8, function() 
+RegisterKeyBind(Key.F8, function()
     config.showStats = not config.showStats
     SaveConfig()
+end)
+
+-- DEBUG TRY SAVE REMOVE LATER
+RegisterKeyBind(Key.F9, function()
+    SaveDataToLuaTable(SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
 end)
 
 -- [EN] FREE POSITIONING (Arrow Keys) / [FR] DÉPLACEMENT LIBRE (Flèches Directionnelles)
@@ -237,9 +261,10 @@ RegisterKeyBind(VK_DOWN, function()
     SaveConfig()
 end)
 
+
 -- [EN] SCALING (Page Up / Page Down) / [FR] TAILLE DU HUD (Page Up / Page Down)
-local VK_PRIOR = 0x21 -- Page Up
-local VK_NEXT  = 0x22 -- Page Down
+local VK_PRIOR = 0x21               -- Page Up
+local VK_NEXT  = 0x22               -- Page Down
 
 RegisterKeyBind(VK_NEXT, function() -- Page Down (Réduire)
     config.scale = math.max(0.5, config.scale - 0.1)
@@ -259,11 +284,6 @@ end)
 -- [EN] MAIN GAME TICK / [FR] BOUCLE PRINCIPALE
 -- ==========================================
 local function GameTickLogic(dt)
-    if not initialized then
-        InitHUD()
-        return
-    end
-
     if cooldownAction > 0 then cooldownAction = cooldownAction - dt end
     if chronoEnMarche then tempsActuel = tempsActuel + dt end
     if tempsMessage > 0 then
@@ -278,7 +298,7 @@ local function GameTickLogic(dt)
         local minutes = math.floor((tempsActuel % 3600) / 60)
         local secondes = math.floor(tempsActuel % 60)
         local millisecondes = math.floor((tempsActuel % 1) * 100)
-        local tempsFormate = (heures > 0) 
+        local tempsFormate = (heures > 0)
             and string.format("%02d:%02d:%02d.%02d", heures, minutes, secondes, millisecondes)
             or string.format("%02d:%02d.%02d", minutes, secondes, millisecondes)
         table.insert(lines, "Timer : " .. tempsFormate)
@@ -297,7 +317,51 @@ local function GameTickLogic(dt)
     end
 end
 
-RegisterHook("/Game/Pose/Characters/PlayerCharacter/ABP_Player.ABP_Player_C:OnTick", function(self, DeltaTime)
-    local dt = type(DeltaTime) == "number" and DeltaTime or DeltaTime:get()
-    pcall(GameTickLogic, dt)
+local function StartPlayerHook()
+    if not initialized then
+        Init()
+        if not initialized then
+            error("[PracticeMod] Unable to initialize PracticeMod, maybe try restarting?")
+            return
+        end
+        playerPreHook, playerPostHook = RegisterHook(
+            "/Game/Pose/Characters/PlayerCharacter/ABP_Player.ABP_Player_C:OnTick",
+            function(self, DeltaTime)
+                local dt = type(DeltaTime) == "number" and DeltaTime or DeltaTime:get()
+                pcall(GameTickLogic, dt)
+                -- print('running logic')
+            end)
+        -- Forces reinit when returning to main menu/resuming
+        quitPreHook, quitPostHook = RegisterHook("/Game/Pose/Common/Systems/BP_PoseHUD.BP_PoseHUD_C:ReturnToMainMenu",
+            Deinit)
+    end
+end
+
+local player = UEHelpers:GetPlayer()
+if player:IsValid() then
+    StartPlayerHook()
+end
+
+
+local gameStartRegistered = false
+RegisterBeginPlayPostHook(function(Context)
+    if not gameStartRegistered then
+        RegisterHook("/Game/Pose/UI/LoadingScreen/WBP_LoadingScreen.WBP_LoadingScreen_C:StartFadeOut", function()
+            -- Calling DoesPlayerExist() and maybe Init()
+            -- while the game is loading seems to cause an infinite load,
+            -- so we have to wait until later
+            StartPlayerHook()
+            if pendingSaveStateLoad then
+                local state = savestates[currentSlot]
+                ---@type ABP_PosePlayerPawn_C
+                local pawn = UEHelpers:GetPlayer()
+                pawn:K2_TeleportTo(state.pos, state.rot)
+                pawn.PrimaryHealth:SetEnergy(state.health)
+                pawn.HealEnergy:SetEnergy(state.heals)
+                pawn.AmmoEnergy:SetEnergy(state.ammo)
+                pendingSaveStateLoad = false
+            end
+        end)
+        gameStartRegistered = true
+    end
 end)
