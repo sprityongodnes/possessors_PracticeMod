@@ -1,4 +1,5 @@
 local UEHelpers = require("UEHelpers")
+local saveio = require("saveio")
 
 -- ==========================================
 -- [EN] MOD CONFIGURATION SYSTEM
@@ -53,14 +54,24 @@ LoadConfig()
 local initialized = false
 local MainWidget = nil
 local TextBox = nil
+---@type USaveSlotSubsystem
 local SaveDataSubsystem = nil
-local PlayerPortal = nil
+---@type ABP_PoseGameMode_C
+local PoseGameMode = nil
 
 local chronoEnMarche = false
 local tempsActuel = 0.0
 local messageAction = ""
 local tempsMessage = 0
 local cooldownAction = 0.0
+
+-- Hooks to track
+local playerPreHook
+local playerPostHook
+local quitPreHook
+local quitPostHook
+local loadingScreenPreHook
+local loadingScreenPostHook
 
 local savestates = {}
 for i = 1, 5 do
@@ -120,6 +131,7 @@ local function Init()
         ApplyHUDTransforms()
 
         SaveDataSubsystem = FindFirstOf("SaveSlotSubsystem")
+        PoseGameMode = FindFirstOf("BP_PoseGameMode_C")
     end)
 
     if success then
@@ -138,20 +150,27 @@ local function SaveState()
     local Loc = Pawn:K2_GetActorLocation()
     local Rot = Pawn:K2_GetActorRotation()
 
-    savestates[currentSlot] = {
-        saved = true,
-        attempts = 0,
-        posX = Loc.X,
-        posY = Loc.Y,
-        posZ = Loc.Z,
-        rotPitch = Rot.Pitch,
-        rotRoll = Rot.Roll,
-        rotYaw = Rot.Yaw,
-        health = Pawn.PrimaryHealth:GetCurrentEnergy(),
-        heals = Pawn.HealEnergy:GetCurrentEnergy(),
-        ammo = Pawn.AmmoEnergy:GetCurrentEnergy(),
-        saveData = SaveDataSubsystem:GetSaveGame(),
-    }
+    ---@type UPoseSaveSlot
+    local saveData = SaveDataSubsystem:GetSaveGame()
+    -- savestates[currentSlot] = {
+    --     saved = true,
+    --     attempts = 0,
+    --     posX = Loc.X,
+    --     posY = Loc.Y,
+    --     posZ = Loc.Z,
+    --     rotPitch = Rot.Pitch,
+    --     rotRoll = Rot.Roll,
+    --     rotYaw = Rot.Yaw,
+    --     health = Pawn.PrimaryHealth:GetCurrentEnergy(),
+    --     heals = Pawn.HealEnergy:GetCurrentEnergy(),
+    --     ammo = Pawn.AmmoEnergy:GetCurrentEnergy(),
+    --     saveData = saveData,
+    --     abilityFlags = saveData.SaveSlotData.PlayerSaveData.UnlockedAbilityFlags
+    -- }
+
+    savestates[currentSlot] = { luaSave = SaveDataToLuaTable(saveData.SaveSlotData), saveData = saveData }
+
+    -- print(SaveDataSubsystem:WriteSaveSlotData(FString("SavestateSave"), 5, saveData.SaveSlotData))
 
     messageAction = "Saved Slot " .. tostring(currentSlot)
     tempsMessage = 2.0
@@ -159,41 +178,50 @@ end
 
 -- [EN] Load State Logic / [FR] Logique de chargement
 local function LoadState()
-    -- Things to look at
-    -- QuestManager
-    -- MapManager
-    -- BP_PosePlayerPawn_C has some update functions
     if cooldownAction > 0 then return end
     local state = savestates[currentSlot]
 
-    if not state or not state.saved then
+    if not state then
         messageAction = "Slot " .. tostring(currentSlot) .. " is empty!"
         tempsMessage = 1.5
         return
     end
+    -- local path = "/Game/Pose/Common/Systems/BP_MapManager.BP_MapManager_C:SaveSlotSubsystem_OnLoadEnd"
+    -- loadingScreenPreHook, loadingScreenPostHook = RegisterHook(path, function()
+    ---@type ABP_PosePlayerController_C
+    local controller = UEHelpers:GetPlayerController()
+    controller:RestartLevel()
+    --     UnregisterHook(path, loadingScreenPreHook, loadingScreenPostHook)
+    --     print('AY IM WALKIN HERE')
+    -- end)
 
-    ---@type ABP_PosePlayerPawn_C
-    local Pawn = UEHelpers.GetPlayer()
-    if not Pawn or not SaveDataSubsystem then return end
+    -- ---@type ABP_PosePlayerController_C
+    -- local controller = UEHelpers:GetPlayerController()
+    -- ---@type ABP_PosePlayerPawn_C
+    -- local Pawn = controller.Pawn
+    -- if not Pawn or not SaveDataSubsystem then return end
 
-    SaveDataSubsystem.ActiveSaveGame = state.saveData
-    SaveDataSubsystem:LoadData()
 
-    Pawn:K2_TeleportTo({ X = state.posX, Y = state.posY, Z = state.posZ },
-        { Pitch = state.rotPitch, Roll = state.rotRoll, Yaw = state.rotYaw })
+    -- LoadLuaData(state.luaSave, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
+    SaveDataSubsystem:SetSavingEnabled(FName("meow"), false)
+    LoadLuaData(savestates[currentSlot].luaSave, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
+    local path = "/Script/Pose.PoseHUD:HideLoadingScreen"
+    ExecuteInGameThreadWithDelay(1000, function()
+        SaveDataSubsystem:SetSavingEnabled(FName("woof"), true)
+        print('reenabled saving')
+    end)
 
-    Pawn.PrimaryHealth:SetEnergy(state.health)
-    Pawn.HealEnergy:SetEnergy(state.heals)
-    Pawn.AmmoEnergy:SetEnergy(state.ammo)
-    -- just start calling everything and hope it works
-    Pawn:UpdatePlayerStats()
-    Pawn:UpdateSwimEnergyWidgetVisibility()
-    Pawn:UpdateWallRunEnergyWidgetVisibility()
-    ---@type ABP_MapManager_C
-    local mapManager = FindFirstOf("BP_MapManager_C")
-    mapManager:SaveSlotSubsystem_OnLoadEnd(true)
+    controller:RestartLevel()
 
-    state.attempts = state.attempts + 1
+    -- Pawn:K2_TeleportTo({ X = state.posX, Y = state.posY, Z = state.posZ },
+    --     { Pitch = state.rotPitch, Roll = state.rotRoll, Yaw = state.rotYaw })
+
+    -- Why does this work? Great question.
+    -- All I know is this needs to run before something important happens
+    -- but slightly after RestartLevel is called and this hook happens to work.
+
+
+    -- state.attempts = state.attempts + 1
     cooldownAction = 0.3
     messageAction = "Loaded Slot " .. tostring(currentSlot)
     tempsMessage = 1.0
@@ -229,6 +257,11 @@ RegisterKeyBind(Key.F8, function()
     SaveConfig()
 end)
 
+-- DEBUG TRY SAVE REMOVE LATER
+RegisterKeyBind(Key.F9, function()
+    SaveDataToLuaTable(SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
+end)
+
 -- [EN] FREE POSITIONING (Arrow Keys) / [FR] DÉPLACEMENT LIBRE (Flèches Directionnelles)
 -- Utilisation des codes hexadécimaux bruts pour garantir que la touche soit reconnue
 local VK_LEFT  = 0x25
@@ -260,6 +293,7 @@ RegisterKeyBind(VK_DOWN, function()
     ApplyHUDTransforms()
     SaveConfig()
 end)
+
 
 -- [EN] SCALING (Page Up / Page Down) / [FR] TAILLE DU HUD (Page Up / Page Down)
 local VK_PRIOR = 0x21               -- Page Up
@@ -323,16 +357,22 @@ local function StartPlayerHook()
             error("[PracticeMod] Unable to initialize PracticeMod, maybe try restarting?")
             return
         end
-        local mainHookIds = RegisterHook("/Game/Pose/Characters/PlayerCharacter/ABP_Player.ABP_Player_C:OnTick",
+        playerPreHook, playerPostHook = RegisterHook(
+            "/Game/Pose/Characters/PlayerCharacter/ABP_Player.ABP_Player_C:OnTick",
             function(self, DeltaTime)
                 local dt = type(DeltaTime) == "number" and DeltaTime or DeltaTime:get()
                 pcall(GameTickLogic, dt)
                 -- print('running logic')
             end)
         -- Forces reinit when returning to main menu/resuming
-        RegisterHook("/Game/Pose/Common/Systems/BP_PoseHUD.BP_PoseHUD_C:ReturnToMainMenu", function()
-            initialized = false
-        end)
+        quitPreHook, quitPostHook = RegisterHook("/Game/Pose/Common/Systems/BP_PoseHUD.BP_PoseHUD_C:ReturnToMainMenu",
+            function()
+                initialized = false
+                UnregisterHook("/Game/Pose/Common/Systems/BP_PoseHUD.BP_PoseHUD_C:ReturnToMainMenu", quitPreHook,
+                    quitPostHook)
+                UnregisterHook("/Game/Pose/Characters/PlayerCharacter/ABP_Player.ABP_Player_C:OnTick", playerPreHook,
+                    playerPostHook)
+            end)
     end
 end
 
@@ -341,7 +381,6 @@ if player:IsValid() then
     StartPlayerHook()
 end
 
--- APoseGameMode ResetWorld!
 
 local gameStartRegistered = false
 RegisterBeginPlayPostHook(function(Context)
