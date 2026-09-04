@@ -1,6 +1,3 @@
-# possessors_PracticeMod
-
-One mod UE4SS for Possessor(s) game
 
 # 🎭 Possessor(s) - UE4SS Practice Mod
 
