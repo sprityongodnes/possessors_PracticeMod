@@ -34,7 +34,6 @@ SaveState = {}
 ---@param saveData FSaveSlotData
 ---@return LuaSaveData
 function SaveDataToLuaTable(saveData)
-    print("Saving current save data as a lua table!")
     local perObjData = {}
 
     -- Per object save data handling
@@ -51,7 +50,7 @@ function SaveDataToLuaTable(saveData)
             FloatMap = {},
             VectorMap = {},
         }
-        local i = 0
+        local i = 1
         objData.FlagSet:ForEach(function(name)
             if not name then return true end
             ---@type FName
@@ -59,41 +58,40 @@ function SaveDataToLuaTable(saveData)
             luaObjData.FlagSet[i] = flagFName:ToString()
             i = i + 1
         end)
-        objData.BoolMap:ForEach(function(key, value)
-            if not key then return true end
+        objData.BoolMap:ForEach(function(k, v)
+            if not k then return true end
             ---@type FName
-            local boolFName = key:get()
+            local boolFName = k:get()
             ---@type boolean
-            local bool = value:get()
+            local bool = v:get()
             luaObjData.BoolMap[boolFName:ToString()] = bool
         end)
-        objData.IntMap:ForEach(function(key, value)
-            if not key then return true end
+        objData.IntMap:ForEach(function(k, v)
+            if not k then return true end
             ---@type FName
-            local intFName = key:get()
+            local intFName = k:get()
             ---@type integer
-            local int = value:get()
+            local int = v:get()
             luaObjData.IntMap[intFName:ToString()] = int
         end)
-        objData.FloatMap:ForEach(function(key, value)
-            if not key then return true end
+        objData.FloatMap:ForEach(function(k, v)
+            if not k then return true end
             ---@type FName
-            local floatFName = key:get()
+            local floatFName = k:get()
             ---@type number
-            local float = value:get()
+            local float = v:get()
             luaObjData.FloatMap[floatFName:ToString()] = float
         end)
-        objData.VectorMap:ForEach(function(key, value)
-            if not key then return true end
+        objData.VectorMap:ForEach(function(k, v)
+            if not k then return true end
             ---@type FName
-            local vectorFName = key:get()
+            local vectorFName = k:get()
             ---@type FVector
-            local vector = value:get()
+            local vector = v:get()
             luaObjData.VectorMap[vectorFName:ToString()] = vector
         end)
 
         perObjData[fname:ToString()] = luaObjData
-        print("Saving object data: " .. fname:ToString())
     end)
 
 
@@ -105,6 +103,12 @@ function SaveDataToLuaTable(saveData)
     }
 end
 
+local function LoadDataIntoFNameMap(map, data)
+    map:Empty()
+    for k, v in pairs(data) do
+        map:Add(FName(k), v)
+    end
+end
 --- Loads data from lua save data into an in-engine
 --- save data object.
 --- As I can't figure out how to construct certain objects without causing a crash,
@@ -112,28 +116,35 @@ end
 ---@param luaData LuaSaveData
 ---@param saveData FSaveSlotData
 function LoadLuaData(luaData, saveData)
-    -- saveData.CurrentCheckpointID = FName(luaData.currentCheckpointName)
-    -- saveData.CurrentCheckpointRegionTag.TagName = FName(luaData.currentCheckpointRegionTag)
+    saveData.CurrentCheckpointID = FName(luaData.currentCheckpointName)
+    saveData.CurrentCheckpointRegionTag.TagName = FName(luaData.currentCheckpointRegionTag)
 
     -- Object data
-    -- saveData.PerObjectSaveData:Empty()
-
     -- avoids a concurrent modification issue, didn't test if this was necessary but just to be safe
     local toRemove = {}
-    local i = 1 -- lua arrays start at 1???
+    local i = 1 -- lua arrays start at 1
     saveData.PerObjectSaveData:ForEach(function(k, v)
         local name = k:get()
-        print('checking ' .. name:ToString())
-        if not luaData.perObjectSaveData[name:ToString()] then
+        local luaObjData = luaData.perObjectSaveData[name:ToString()]
+        if not luaObjData then
             toRemove[i] = name
             i = i + 1
-            print('appending to toRemove')
+        else
+            ---@type FPoseObjectData
+            local objData = v:get()
+            LoadDataIntoFNameMap(objData.BoolMap, luaObjData.BoolMap)
+            LoadDataIntoFNameMap(objData.IntMap, luaObjData.IntMap)
+            LoadDataIntoFNameMap(objData.FloatMap, luaObjData.FloatMap)
+            LoadDataIntoFNameMap(objData.VectorMap, luaObjData.VectorMap)
+            objData.FlagSet:Empty()
+            for i, flagName in ipairs(luaObjData.FlagSet) do
+                print('adding flag ' .. flagName)
+                objData.FlagSet:Add(FName(flagName))
+            end
         end
     end)
 
-    -- print(table.concat(toRemove, ", "))
     for i, v in ipairs(toRemove) do
-        print('removing')
         saveData.PerObjectSaveData:Remove(v)
     end
     -- for k, v in pairs(luaData.perObjectSaveData) do

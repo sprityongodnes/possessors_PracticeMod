@@ -158,15 +158,14 @@ local function LoadState()
 
     LoadLuaData(savestates[currentSlot].luaSave, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
     SaveDataSubsystem:SetSavingEnabled(FName("meow"), false)
-    -- SaveDataSubsystem.ActiveSaveGame = state.saveData
-    -- LoadLuaData(savestates[currentSlot].luaSave, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
+    controller:RestartLevel()
+
     local path = "/Script/Pose.PoseHUD:HideLoadingScreen"
-    ExecuteInGameThreadWithDelay(1000, function()
+    ExecuteInGameThreadWithDelay(1100, function()
         SaveDataSubsystem:SetSavingEnabled(FName("meow"), true)
         SaveDataSubsystem.SaveDisablingReasons:Empty()
     end)
 
-    controller:RestartLevel()
 
     -- state.attempts = state.attempts + 1
     cooldownAction = 0.3
