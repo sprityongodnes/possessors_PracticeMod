@@ -10,12 +10,12 @@ local configFileName = "practice_mod_config.txt"
 
 -- [EN] Default settings / [FR] Paramètres par défaut
 local config = {
-    scale = 1.0,        -- [EN] Text scale / [FR] Échelle du texte
-    posX = 50,          -- [EN] X Position in pixels / [FR] Position X en pixels
-    posY = 50,          -- [EN] Y Position in pixels / [FR] Position Y en pixels
-    showTimer = true,   -- [EN] Show Timer / [FR] Afficher le chrono
-    showStats = true,   -- [EN] Show Stats / [FR] Afficher les stats
-    showFPS = true      -- [EN] Show FPS / [FR] Afficher les FPS
+    scale = 1.0,      -- [EN] Text scale / [FR] Échelle du texte
+    posX = 50,        -- [EN] X Position in pixels / [FR] Position X en pixels
+    posY = 50,        -- [EN] Y Position in pixels / [FR] Position Y en pixels
+    showTimer = true, -- [EN] Show Timer / [FR] Afficher le chrono
+    showStats = true, -- [EN] Show Stats / [FR] Afficher les stats
+    showFPS = true    -- [EN] Show FPS / [FR] Afficher les FPS
 }
 
 -- [EN] Save settings to file / [FR] Sauvegarder les paramètres dans un fichier
@@ -60,8 +60,8 @@ local MainWidget = nil
 local TextBox = nil
 ---@type USaveSlotSubsystem
 local SaveDataSubsystem = nil
----@type ABP_PoseGameMode_C
-local PoseGameMode = nil
+---@type ABP_PosePlayerController_C
+local playerController = nil
 
 local chronoEnMarche = false
 local tempsActuel = 0.0
@@ -93,13 +93,13 @@ end
 
 -- [EN] Initializes needed variables and finds important objects / [FR] Créer des vars utiles et trouver les objets utiles
 local function Init()
-    local p = UEHelpers.GetPlayerController()
-    if not p or not p:IsValid() or not p.MyHUD or not p.MyHUD:IsValid() then
+    playerController = UEHelpers.GetPlayerController()
+    if not playerController or not playerController:IsValid() or not playerController.MyHUD or not playerController.MyHUD:IsValid() then
         return false
     end
 
     local success, err = pcall(function()
-        MainWidget = Construct("/Script/UMG.UserWidget", p.MyHUD.PlayerHUD, "PracticeModRootWidget")
+        MainWidget = Construct("/Script/UMG.UserWidget", playerController.MyHUD.PlayerHUD, "PracticeModRootWidget")
         local tree = Construct("/Script/UMG.WidgetTree", MainWidget, "PracticeModRootWidgetTree")
         MainWidget.WidgetTree = tree
 
@@ -175,8 +175,8 @@ local function LoadState()
     SaveDataSubsystem:SetSavingEnabled(FName("meow"), false)
     controller:RestartLevel()
 
-    Deinit()                    
-    pendingSaveStateLoad = true 
+    Deinit()
+    pendingSaveStateLoad = true
 
     ExecuteInGameThreadWithDelay(1100, function()
         SaveDataSubsystem:SetSavingEnabled(FName("meow"), true)
@@ -259,8 +259,8 @@ RegisterKeyBind(VK_DOWN, function()
 end)
 
 -- [EN] SCALING (Page Up / Page Down) / [FR] TAILLE DU HUD (Page Up / Page Down)
-local VK_PRIOR = 0x21               -- Page Up
-local VK_NEXT  = 0x22               -- Page Down
+local VK_PRIOR = 0x21 -- Page Up
+local VK_NEXT  = 0x22 -- Page Down
 
 RegisterKeyBind(VK_NEXT, function()
     config.scale = math.max(0.5, config.scale - 0.1)
@@ -315,9 +315,22 @@ local function GameTickLogic(dt)
         table.insert(lines, string.format("Slot: %d | Attempts: %d", currentSlot, attemptsCount))
     end
 
+    -- boss bar
+    ---@type ABP_PoseHUD_C
+    local hud = playerController.MyHUD
+    local bossBar = hud.PlayerHUD.WBP_BossHealthBar
+    if IsValid(bossBar) then
+        local boss = bossBar.BOSS
+        if IsValid(boss) then
+            local hp = boss.EnemyHealth:GetCurrentEnergy()
+            table.insert(lines, "Current Boss Health: " .. hp)
+        end
+    end
+
     if messageAction ~= "" then
         table.insert(lines, messageAction)
     end
+
 
     if TextBox and TextBox:IsValid() then
         TextBox:SetText(FText(table.concat(lines, "\n")))
