@@ -71,11 +71,15 @@ local playerPostHook
 local quitPreHook
 local quitPostHook
 
+---@type table<integer, SaveState>
 local savestates = {}
-for i = 1, 5 do
-    savestates[i] = { saved = false, attempts = 0 }
-end
+-- for i = 1, 5 do
+--     savestates[i] = {}
+-- end
 local currentSlot = 1
+-- This variable will cause the player to be warped as soon as a load ends
+-- and is set when loading a save state.
+local pendingSaveStateLoad = false
 
 
 -- [EN] Update HUD Scale and Free Position / [FR] Met à jour l'échelle et la position libre
@@ -123,19 +127,32 @@ local function Init()
     return false
 end
 
+-- Signal we need to reinitialize
+local function Deinit()
+    initialized = false
+    UnregisterHook("/Game/Pose/Common/Systems/BP_PoseHUD.BP_PoseHUD_C:ReturnToMainMenu", quitPreHook,
+        quitPostHook)
+    UnregisterHook("/Game/Pose/Characters/PlayerCharacter/ABP_Player.ABP_Player_C:OnTick", playerPreHook,
+        playerPostHook)
+end
+
 -- [EN] Save State Logic / [FR] Logique de sauvegarde
 local function SaveState()
     ---@type ABP_PosePlayerPawn_C
     local Pawn = UEHelpers.GetPlayer()
     if not Pawn or not SaveDataSubsystem then return end
 
-    local Loc = Pawn:K2_GetActorLocation()
-    local Rot = Pawn:K2_GetActorRotation()
-
     ---@type UPoseSaveSlot
     local saveData = SaveDataSubsystem:GetSaveGame()
 
-    savestates[currentSlot] = { luaSave = SaveDataToLuaTable(saveData.SaveSlotData), saveData = saveData }
+    savestates[currentSlot] = {
+        luaSaveData = SaveDataToLuaTable(saveData.SaveSlotData),
+        pos = Pawn:K2_GetActorLocation(),
+        rot = Pawn:K2_GetActorRotation(),
+        health = Pawn.PrimaryHealth:GetCurrentEnergy(),
+        ammo = Pawn.AmmoEnergy:GetCurrentEnergy(),
+        heals = Pawn.HealEnergy:GetCurrentEnergy(),
+    }
 
     -- print(SaveDataSubsystem:WriteSaveSlotData(FString("SavestateSave"), 5, saveData.SaveSlotData))
 
@@ -156,9 +173,13 @@ local function LoadState()
     ---@type ABP_PosePlayerController_C
     local controller = UEHelpers:GetPlayerController()
 
-    LoadLuaData(savestates[currentSlot].luaSave, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
+    LoadLuaData(state.luaSaveData, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
     SaveDataSubsystem:SetSavingEnabled(FName("meow"), false)
     controller:RestartLevel()
+
+    Deinit()                    -- Some stuff gets recreated on RestartLevel() and we need to call Init() again.
+    pendingSaveStateLoad = true -- Once the loading screen ends, the player will be warped.
+
 
     local path = "/Script/Pose.PoseHUD:HideLoadingScreen"
     ExecuteInGameThreadWithDelay(1100, function()
@@ -312,13 +333,7 @@ local function StartPlayerHook()
             end)
         -- Forces reinit when returning to main menu/resuming
         quitPreHook, quitPostHook = RegisterHook("/Game/Pose/Common/Systems/BP_PoseHUD.BP_PoseHUD_C:ReturnToMainMenu",
-            function()
-                initialized = false
-                UnregisterHook("/Game/Pose/Common/Systems/BP_PoseHUD.BP_PoseHUD_C:ReturnToMainMenu", quitPreHook,
-                    quitPostHook)
-                UnregisterHook("/Game/Pose/Characters/PlayerCharacter/ABP_Player.ABP_Player_C:OnTick", playerPreHook,
-                    playerPostHook)
-            end)
+            Deinit)
     end
 end
 
@@ -335,9 +350,17 @@ RegisterBeginPlayPostHook(function(Context)
             -- Calling DoesPlayerExist() and maybe Init()
             -- while the game is loading seems to cause an infinite load,
             -- so we have to wait until later
-            -- if DoesPlayerExist() then
             StartPlayerHook()
-            -- end
+            if pendingSaveStateLoad then
+                local state = savestates[currentSlot]
+                ---@type ABP_PosePlayerPawn_C
+                local pawn = UEHelpers:GetPlayer()
+                pawn:K2_TeleportTo(state.pos, state.rot)
+                pawn.PrimaryHealth:SetEnergy(state.health)
+                pawn.HealEnergy:SetEnergy(state.heals)
+                pawn.AmmoEnergy:SetEnergy(state.ammo)
+                pendingSaveStateLoad = false
+            end
         end)
         gameStartRegistered = true
     end
