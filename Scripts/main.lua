@@ -57,7 +57,6 @@ local TextBox = nil
 ---@type USaveSlotSubsystem
 local SaveDataSubsystem = nil
 ---@type ABP_PoseGameMode_C
-local PoseGameMode = nil
 
 local chronoEnMarche = false
 local tempsActuel = 0.0
@@ -70,8 +69,6 @@ local playerPreHook
 local playerPostHook
 local quitPreHook
 local quitPostHook
-local loadingScreenPreHook
-local loadingScreenPostHook
 
 local savestates = {}
 for i = 1, 5 do
@@ -152,23 +149,8 @@ local function SaveState()
 
     ---@type UPoseSaveSlot
     local saveData = SaveDataSubsystem:GetSaveGame()
-    -- savestates[currentSlot] = {
-    --     saved = true,
-    --     attempts = 0,
-    --     posX = Loc.X,
-    --     posY = Loc.Y,
-    --     posZ = Loc.Z,
-    --     rotPitch = Rot.Pitch,
-    --     rotRoll = Rot.Roll,
-    --     rotYaw = Rot.Yaw,
-    --     health = Pawn.PrimaryHealth:GetCurrentEnergy(),
-    --     heals = Pawn.HealEnergy:GetCurrentEnergy(),
-    --     ammo = Pawn.AmmoEnergy:GetCurrentEnergy(),
-    --     saveData = saveData,
-    --     abilityFlags = saveData.SaveSlotData.PlayerSaveData.UnlockedAbilityFlags
-    -- }
 
-    savestates[currentSlot] = { luaSave = SaveDataToLuaTable(saveData.SaveSlotData), saveData = saveData }
+    savestates[currentSlot] = { luaSave = SaveDataToLuaTable(saveData.SaveSlotData) }
 
     -- print(SaveDataSubsystem:WriteSaveSlotData(FString("SavestateSave"), 5, saveData.SaveSlotData))
 
@@ -186,21 +168,8 @@ local function LoadState()
         tempsMessage = 1.5
         return
     end
-    -- local path = "/Game/Pose/Common/Systems/BP_MapManager.BP_MapManager_C:SaveSlotSubsystem_OnLoadEnd"
-    -- loadingScreenPreHook, loadingScreenPostHook = RegisterHook(path, function()
     ---@type ABP_PosePlayerController_C
     local controller = UEHelpers:GetPlayerController()
-    controller:RestartLevel()
-    --     UnregisterHook(path, loadingScreenPreHook, loadingScreenPostHook)
-    --     print('AY IM WALKIN HERE')
-    -- end)
-
-    -- ---@type ABP_PosePlayerController_C
-    -- local controller = UEHelpers:GetPlayerController()
-    -- ---@type ABP_PosePlayerPawn_C
-    -- local Pawn = controller.Pawn
-    -- if not Pawn or not SaveDataSubsystem then return end
-
 
     -- LoadLuaData(state.luaSave, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
     SaveDataSubsystem:SetSavingEnabled(FName("meow"), false)
@@ -212,14 +181,6 @@ local function LoadState()
     end)
 
     controller:RestartLevel()
-
-    -- Pawn:K2_TeleportTo({ X = state.posX, Y = state.posY, Z = state.posZ },
-    --     { Pitch = state.rotPitch, Roll = state.rotRoll, Yaw = state.rotYaw })
-
-    -- Why does this work? Great question.
-    -- All I know is this needs to run before something important happens
-    -- but slightly after RestartLevel is called and this hook happens to work.
-
 
     -- state.attempts = state.attempts + 1
     cooldownAction = 0.3
