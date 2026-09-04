@@ -176,6 +176,10 @@ function SaveDataToLuaTable(saveData)
         end
     end)
 
+    local currentWeapon = saveData.PlayerSaveData.CurrentLoadout.PrimaryWeapon
+    local currentWeaponName = ""
+    if IsValid(currentWeapon) then currentWeaponName = currentWeapon:GetFName():ToString() end
+
     return {
         luaPlayerSaveData = {
             Chroma = saveData.PlayerSaveData.Chroma,
@@ -185,7 +189,7 @@ function SaveDataToLuaTable(saveData)
             MapTrackedDeathLocation = saveData.PlayerSaveData.MapTrackedDeathLocation,
             ItemAmounts = playerSaveItemAmounts,
             PlayerWeaponDatas = playerSaveWeaponDatas,
-            LoadoutPrimaryWeapon = saveData.PlayerSaveData.CurrentLoadout.PrimaryWeapon:GetFName():ToString(),
+            LoadoutPrimaryWeapon = currentWeaponName,
             LoadoutSecondaryWeapons = playerLoadoutSecondaryWeapons,
         },
         luaQuestSaveData = {
@@ -290,9 +294,14 @@ function LoadLuaData(luaData, saveData)
                 end
             end
         end
+
         -- Set loadout
-        saveData.PlayerSaveData.CurrentLoadout.PrimaryWeapon = itemDataProvider:FindWeaponByName(0,
-            FName(luaData.luaPlayerSaveData.LoadoutPrimaryWeapon))
+        if luaData.luaPlayerSaveData.LoadoutPrimaryWeapon == "" then
+            saveData.PlayerSaveData.CurrentLoadout.PrimaryWeapon = CreateInvalidObject()
+        else
+            saveData.PlayerSaveData.CurrentLoadout.PrimaryWeapon = itemDataProvider:FindWeaponByName(0,
+                FName(luaData.luaPlayerSaveData.LoadoutPrimaryWeapon))
+        end
         for k, v in pairs(luaData.luaPlayerSaveData.LoadoutSecondaryWeapons) do
             if v == "" then
                 saveData.PlayerSaveData.CurrentLoadout.SecondaryWeapons:Add(k, CreateInvalidObject())
