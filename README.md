@@ -1,4 +1,3 @@
-
 # 🎭 Possessor(s) - UE4SS Practice Mod
 
 [EN] A lightweight practice and speedrun mod for **Possessor(s)**, powered by UE4SS. Features local savestates, real-time timer, health/ammo tracking, and a customizable HUD overlay.
@@ -41,5 +40,6 @@
 ## 📦 Installation
 
 1. Install **UE4SS** for _Possessor(s)_.
-2. Place the contents of this repository in `Possessor(s)\Pose\Binaries\Win64\ue4ss\Mods\PracticeMod\`.
-3. Ensure the mod folder name (`PracticeMod`) is added to `Mods/mods.txt` and set to `1`.
+2. Download the latest release from the "Releases" page on the right (download the file labeled Source Code.zip)
+3. Place the contents of that file in `Possessor(s)\Pose\Binaries\Win64\ue4ss\Mods\PracticeMod\`.
+4. Ensure the mod folder name (`PracticeMod`) is added to `Mods/mods.txt` and set to `1`.
