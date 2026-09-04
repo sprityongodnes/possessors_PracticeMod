@@ -1,5 +1,6 @@
 local UEHelpers = require("UEHelpers")
 local saveio = require("saveio")
+local util = require("util")
 
 -- ==========================================
 -- [EN] MOD CONFIGURATION SYSTEM
@@ -76,22 +77,6 @@ for i = 1, 5 do
 end
 local currentSlot = 1
 
-local function IsValid(obj)
-    return obj ~= nil and type(obj.IsValid) == "function" and obj:IsValid()
-end
-
-local function FindClass(path)
-    local cls = StaticFindObject(path)
-    if not IsValid(cls) then error("StaticFindObject failed: " .. path) end
-    return cls
-end
-
-local function Construct(classPath, outer, name)
-    local cls = FindClass(classPath)
-    local obj = StaticConstructObject(cls, outer, FName(name))
-    if not IsValid(obj) then error("StaticConstructObject failed: " .. classPath) end
-    return obj
-end
 
 -- [EN] Update HUD Scale and Free Position / [FR] Met à jour l'échelle et la position libre
 local function ApplyHUDTransforms()
@@ -150,7 +135,7 @@ local function SaveState()
     ---@type UPoseSaveSlot
     local saveData = SaveDataSubsystem:GetSaveGame()
 
-    savestates[currentSlot] = { luaSave = SaveDataToLuaTable(saveData.SaveSlotData) }
+    savestates[currentSlot] = { luaSave = SaveDataToLuaTable(saveData.SaveSlotData), saveData = saveData }
 
     -- print(SaveDataSubsystem:WriteSaveSlotData(FString("SavestateSave"), 5, saveData.SaveSlotData))
 
@@ -171,13 +156,14 @@ local function LoadState()
     ---@type ABP_PosePlayerController_C
     local controller = UEHelpers:GetPlayerController()
 
-    -- LoadLuaData(state.luaSave, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
-    SaveDataSubsystem:SetSavingEnabled(FName("meow"), false)
     LoadLuaData(savestates[currentSlot].luaSave, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
+    SaveDataSubsystem:SetSavingEnabled(FName("meow"), false)
+    -- SaveDataSubsystem.ActiveSaveGame = state.saveData
+    -- LoadLuaData(savestates[currentSlot].luaSave, SaveDataSubsystem.ActiveSaveGame.SaveSlotData)
     local path = "/Script/Pose.PoseHUD:HideLoadingScreen"
     ExecuteInGameThreadWithDelay(1000, function()
-        SaveDataSubsystem:SetSavingEnabled(FName("woof"), true)
-        print('reenabled saving')
+        SaveDataSubsystem:SetSavingEnabled(FName("meow"), true)
+        SaveDataSubsystem.SaveDisablingReasons:Empty()
     end)
 
     controller:RestartLevel()

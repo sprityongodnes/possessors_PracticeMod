@@ -20,6 +20,16 @@ LuaSaveData = {}
 ---@field VectorMap table<string, FVector>
 LuaPoseObjectData = {}
 
+--- All information needed for a savestate.
+---@class SaveState
+---@field luaSaveData LuaSaveData
+---@field pos FVector
+---@field rot FRotator
+---@field health number
+---@field ammo number
+---@field heals number
+SaveState = {}
+
 --- Converts an FSaveSlotData to LuaSaveData.
 ---@param saveData FSaveSlotData
 ---@return LuaSaveData
@@ -97,6 +107,8 @@ end
 
 --- Loads data from lua save data into an in-engine
 --- save data object.
+--- As I can't figure out how to construct certain objects without causing a crash,
+--- this can only remove certain things from save data, not add them.
 ---@param luaData LuaSaveData
 ---@param saveData FSaveSlotData
 function LoadLuaData(luaData, saveData)
@@ -104,10 +116,47 @@ function LoadLuaData(luaData, saveData)
     -- saveData.CurrentCheckpointRegionTag.TagName = FName(luaData.currentCheckpointRegionTag)
 
     -- Object data
-    saveData.PerObjectSaveData:Empty()
+    -- saveData.PerObjectSaveData:Empty()
+
+    -- avoids a concurrent modification issue, didn't test if this was necessary but just to be safe
+    local toRemove = {}
+    local i = 1 -- lua arrays start at 1???
+    saveData.PerObjectSaveData:ForEach(function(k, v)
+        local name = k:get()
+        print('checking ' .. name:ToString())
+        if not luaData.perObjectSaveData[name:ToString()] then
+            toRemove[i] = name
+            i = i + 1
+            print('appending to toRemove')
+        end
+    end)
+
+    -- print(table.concat(toRemove, ", "))
+    for i, v in ipairs(toRemove) do
+        print('removing')
+        saveData.PerObjectSaveData:Remove(v)
+    end
     -- for k, v in pairs(luaData.perObjectSaveData) do
-    --     saveData.PerObjectSaveData:Add(FName(k), v) -- ue4ss should convert this table automatically
+    --     print('creating new obj data')
+    -- ---@type FPoseObjectData
+    -- local objData = Construct("/Script/Pose.PoseObjectData", saveData, "saveState_objData_" .. k)
+    -- for name, bool in pairs(v.BoolMap) do
+    --     objData.BoolMap:Add(FName(name), bool)
+    -- end
+    -- for name, int in pairs(v.IntMap) do
+    --     objData.IntMap:Add(FName(name), int)
+    -- end
+    -- for name, float in pairs(v.FloatMap) do
+    --     objData.FloatMap:Add(FName(name), float)
+    -- end
+    -- for name, vec in pairs(v.VectorMap) do
+    --     objData.VectorMap:Add(FName(name), vec)
+    -- end
+    -- for i = 1, #v.FlagSet, 1 do
+    --     objData.FlagSet:Add(FName(v.FlagSet[i]))
+    -- end
+    -- saveData.PerObjectSaveData:Add(FName(k), v) -- ue4ss should convert this table automatically
     -- end
 
-    -- return saveData
+    return saveData
 end
