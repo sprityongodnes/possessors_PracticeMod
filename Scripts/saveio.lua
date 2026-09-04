@@ -10,7 +10,7 @@
 ---@field bHudVisible boolean -- genuinely no clue what this does so I'm not touching it.
 ---@field perObjectSaveData table<string, LuaPoseObjectData>
 ---@field luaPlayerSaveData LuaPlayerSaveData
-LuaSaveData = {}
+---@field luaQuestSaveData LuaQuestSaveData
 
 --- FPoseObjectData mirror class.
 ---@class LuaPoseObjectData
@@ -19,7 +19,6 @@ LuaSaveData = {}
 ---@field IntMap table<string, integer>
 ---@field FloatMap table<string, number>
 ---@field VectorMap table<string, FVector>
-LuaPoseObjectData = {}
 
 --- FPlayerSaveData mirror class.
 ---@class LuaPlayerSaveData
@@ -32,7 +31,20 @@ LuaPoseObjectData = {}
 ---@field CorpseChroma integer
 ---@field LoadoutPrimaryWeapon string
 ---@field LoadoutSecondaryWeapons table<integer, string>>
-LuaPlayerSaveData = {}
+
+-- FQuestSaveData mirror class
+---@class LuaQuestSaveData
+---@field QuestStates table<string, integer>
+---@field StepStates table<string, integer>
+---@field ObjectiveStates table<string, integer>
+
+-- MAP DATA IS NOT SAVED CURRENTLY BECAUSE NONE OF IT SEEMS IMPORTANT
+-- FMapSaveData mirror class
+-- @class LuaMapSaveData
+-- @field RoomSaveDatas table<string, boolean>
+-- @field RegionSaveDatas table<string, boolean> -- All of the data in FRegionSaveData seems pointless except bIsDiscovered.
+-- This seems to be map markers and I sincerely can't be bothered to make save states restore your map markers.
+-- @field MarkerGroupSaveDatas table<string, table<string, FVector>>
 
 --- All information needed for a savestate.
 ---@class SaveState
@@ -42,7 +54,15 @@ LuaPlayerSaveData = {}
 ---@field health number
 ---@field ammo number
 ---@field heals number
-SaveState = {}
+
+local function DumpFNameIntMap(map)
+    local outTable = {}
+    map:ForEach(function(k, v)
+        if not k then return end
+        outTable[k:get():ToString()] = v:get()
+    end)
+    return outTable
+end
 
 --- Converts an FSaveSlotData to LuaSaveData.
 ---@param saveData FSaveSlotData
@@ -120,9 +140,7 @@ function SaveDataToLuaTable(saveData)
     end)
     local playerSaveWeaponDatas = {}
     saveData.PlayerSaveData.PlayerWeaponDatas:ForEach(function(key, value)
-        print('trying to add weapon')
         if not key then return end
-        print('key is real')
         ---@type UWeaponDataAsset
         local weapon = key:get()
         ---@type FPlayerWeaponData
@@ -134,14 +152,12 @@ function SaveDataToLuaTable(saveData)
             local slot = slotParam:get()
             ---@type UAffixDataAsset
             local data = affixData:get()
-            print(IsValid(data))
             if IsValid(data) then
                 affixSlots[slot] = data:GetFName():ToString()
             else
                 affixSlots[slot] = ""
             end
         end)
-        print('adding weapon ' .. weapon:GetFName():ToString())
         playerSaveWeaponDatas[weapon:GetFName():ToString()] = affixSlots
     end)
 
@@ -171,6 +187,11 @@ function SaveDataToLuaTable(saveData)
             PlayerWeaponDatas = playerSaveWeaponDatas,
             LoadoutPrimaryWeapon = saveData.PlayerSaveData.CurrentLoadout.PrimaryWeapon:GetFName():ToString(),
             LoadoutSecondaryWeapons = playerLoadoutSecondaryWeapons,
+        },
+        luaQuestSaveData = {
+            ObjectiveStates = DumpFNameIntMap(saveData.QuestSaveData.ObjectiveStates),
+            QuestStates = DumpFNameIntMap(saveData.QuestSaveData.QuestStates),
+            StepStates = DumpFNameIntMap(saveData.QuestSaveData.StepStates),
         },
         currentCheckpointName = saveData.CurrentCheckpointID:ToString(),
         currentCheckpointRegionTag = saveData.CurrentCheckpointRegionTag.TagName:ToString(),
@@ -227,13 +248,10 @@ function LoadLuaData(luaData, saveData)
     ---@type UItemDataProvider
     local itemDataProvider = FindFirstOf("ItemDataProvider")
     if IsValid(itemDataProvider) then
-        print('yippeeee')
         -- Item data
         saveData.PlayerSaveData.ItemAmounts:Empty()
         for k, v in pairs(luaData.luaPlayerSaveData.ItemAmounts) do
-            print('adding data: item ' .. k .. ' x' .. v)
             local data = itemDataProvider:FindItemByName(0, FName(k))
-            print(IsValid(data))
             saveData.PlayerSaveData.ItemAmounts:Add(data, v)
         end
         -- Weapon data
@@ -246,13 +264,11 @@ function LoadLuaData(luaData, saveData)
             ---@type UWeaponDataAsset
             local weapon = weaponParam:get()
             if not luaData.luaPlayerSaveData.PlayerWeaponDatas[weapon:GetFName():ToString()] then
-                print('Adding weapon ' .. weapon:GetFName():ToString() .. ' to remove list')
                 toRemove[i] = weapon
                 i = i + 1
             end
         end)
         for index, weaponData in ipairs(toRemove) do
-            print('removing a weapon')
             saveData.PlayerSaveData.PlayerWeaponDatas:Remove(weaponData)
         end
 
@@ -264,10 +280,8 @@ function LoadLuaData(luaData, saveData)
                 local weaponData = saveData.PlayerSaveData.PlayerWeaponDatas:Find(data)
                 -- The return type on Find is wrong, you need to call get() first.
                 local affixSlots = weaponData:get().AffixSlots
-                print('emptied affix slots for weapon ' .. k)
                 affixSlots:Empty()
                 for slot, affixName in pairs(v) do
-                    print('adding an affix ' .. affixName .. ' back to weapon ' .. k)
                     if affixName == "" then
                         affixSlots:Add(slot, CreateInvalidObject())
                     else
@@ -289,6 +303,10 @@ function LoadLuaData(luaData, saveData)
         end
     end
 
+    -- Quest data
+    LoadDataIntoFNameMap(saveData.QuestSaveData.ObjectiveStates, luaData.luaQuestSaveData.ObjectiveStates)
+    LoadDataIntoFNameMap(saveData.QuestSaveData.StepStates, luaData.luaQuestSaveData.StepStates)
+    LoadDataIntoFNameMap(saveData.QuestSaveData.QuestStates, luaData.luaQuestSaveData.QuestStates)
 
     -- Misc player data
     saveData.PlayerSaveData.Chroma = luaData.luaPlayerSaveData.Chroma
@@ -296,6 +314,11 @@ function LoadLuaData(luaData, saveData)
     saveData.PlayerSaveData.DeathLocation = luaData.luaPlayerSaveData.DeathLocation
     saveData.PlayerSaveData.MapTrackedDeathLocation = luaData.luaPlayerSaveData.MapTrackedDeathLocation
     saveData.PlayerSaveData.UnlockedAbilityFlags = luaData.luaPlayerSaveData.UnlockedAbilityFlags
+
+    -- Misc data
+    saveData.CurrentCheckpointID = FName(luaData.currentCheckpointName)
+    saveData.CurrentCheckpointRegionTag = { TagName = FName(luaData.currentCheckpointRegionTag) }
+    saveData.bHUDVisible = luaData.bHudVisible
 
     return saveData
 end
